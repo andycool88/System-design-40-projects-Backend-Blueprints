@@ -1,0 +1,1066 @@
+# Project 07 — Session-Based Authentication vs JWT Authentication
+
+A practical Express.js project demonstrating two common approaches to handling authentication in backend applications: **session-based authentication** and **JSON Web Token (JWT) authentication)**.
+
+This project implements login and protected routes using both methods so you can understand how sessions and JWTs store, verify, and maintain a user's authenticated state.
+
+This is the seventh blueprint in the **Backend System Design — 40 Project Blueprints** series.
+
+---
+
+## 🎯 What This Project Teaches
+
+This project focuses on two important authentication approaches:
+
+* Session-based authentication
+* JWT-based authentication
+* Express sessions
+* Cookies and server-side session state
+* JWT tokens
+* Token signing
+* Token verification
+* Token expiration
+* Authorization headers
+* Protected routes
+* `401 Unauthorized`
+* Stateless vs stateful authentication
+
+The key goal is to understand:
+
+> **Session authentication stores authentication state on the server, while JWT authentication allows the client to carry a signed authentication token.**
+
+---
+
+# 🔐 Session-Based Authentication vs JWT
+
+Sessions and JWTs can both be used to protect backend resources, but they work differently.
+
+### Session-Based Authentication
+
+With sessions, the server maintains information about the authenticated user.
+
+In this project:
+
+```text
+Client
+   ↓
+POST /session-login
+   ↓
+Server creates session
+   ↓
+Session stores user
+   ↓
+Client receives session cookie
+   ↓
+GET /session-protected
+   ↓
+Server checks session
+   ↓
+Allow / Reject
+```
+
+The important idea is:
+
+```text
+Authentication State
+        ↓
+     Server
+        ↓
+     Session
+```
+
+---
+
+### JWT-Based Authentication
+
+With JWT authentication, the server creates a signed token containing information about the user.
+
+In this project:
+
+```text
+Client
+   ↓
+POST /jwt-login
+   ↓
+Server creates JWT
+   ↓
+Client receives token
+   ↓
+Client sends token
+   ↓
+GET /jwt-protected
+   ↓
+Server verifies token
+   ↓
+Allow / Reject
+```
+
+The important idea is:
+
+```text
+Authentication State
+        ↓
+       JWT
+        ↓
+      Client
+```
+
+---
+
+# 🏗️ Architecture
+
+```text
+                           Client
+                             │
+              ┌──────────────┴──────────────┐
+              │                             │
+              ▼                             ▼
+       Session Login                    JWT Login
+       POST /session-login             POST /jwt-login
+              │                             │
+              ▼                             ▼
+      Create Session                   Sign JWT
+              │                             │
+              ▼                             ▼
+        Session Cookie                    Token
+              │                             │
+              ▼                             ▼
+    /session-protected              /jwt-protected
+              │                             │
+              ▼                             ▼
+       Check Session                  Verify JWT
+              │                             │
+        ┌─────┴─────┐                 ┌─────┴─────┐
+        │           │                 │           │
+       Valid      Missing            Valid      Invalid
+        │           │                 │           │
+        ▼           ▼                 ▼           ▼
+      Allow         401              Allow        401
+```
+
+---
+
+# 📡 API Endpoints
+
+| Method | Endpoint             | Authentication | Purpose                            |
+| ------ | -------------------- | -------------- | ---------------------------------- |
+| `POST` | `/session-login`     | None           | Login using session authentication |
+| `GET`  | `/session-protected` | Session        | Access session-protected resource  |
+| `POST` | `/jwt-login`         | None           | Login and receive JWT              |
+| `GET`  | `/jwt-protected`     | JWT            | Access JWT-protected resource      |
+
+---
+
+# 1. Session-Based Authentication
+
+The first authentication approach implemented in this project uses `express-session`.
+
+```javascript
+app.use(session({
+  secret: "keyboard cat",
+  resave: false,
+  saveUninitialized: true
+}));
+```
+
+The session middleware allows Express to maintain authentication state between requests.
+
+---
+
+## 🔑 Session Login
+
+```http
+POST /session-login
+```
+
+When the user logs in, the server stores information about the user inside the session.
+
+```javascript
+req.session.user = {
+  id: 1,
+  name: "Andrew"
+};
+```
+
+The server then responds:
+
+```json
+{
+  "message": "Logged in with session"
+}
+```
+
+The important part is that the user information is stored in:
+
+```text
+req.session.user
+```
+
+---
+
+# 2. Session-Protected Route
+
+```http
+GET /session-protected
+```
+
+The server checks whether the session contains a user.
+
+```javascript
+if (req.session.user) {
+  res.json({
+    message: `Hello ${req.session.user.name}`
+  });
+}
+```
+
+If a user exists in the session, access is allowed.
+
+If there is no authenticated user:
+
+```javascript
+res.status(401).json({
+  error: "Not logged in"
+});
+```
+
+The authentication flow is therefore:
+
+```text
+Request
+   ↓
+Check Session
+   ↓
+Does user exist?
+   │
+   ├── Yes → Allow
+   │
+   └── No → 401
+```
+
+---
+
+# 🍪 Understanding Sessions
+
+A session allows the server to remember a user between HTTP requests.
+
+HTTP itself is stateless.
+
+That means:
+
+```text
+Request 1
+   ↓
+Server responds
+
+Request 2
+   ↓
+Server does not automatically remember Request 1
+```
+
+Sessions provide a mechanism for maintaining that state.
+
+Conceptually:
+
+```text
+Client
+   │
+   │ Session Cookie
+   ▼
+Server
+   │
+   ▼
+Session Data
+   │
+   ▼
+User Information
+```
+
+The client typically carries a session identifier while the server maintains the corresponding session data.
+
+---
+
+# 3. JWT-Based Authentication
+
+The second authentication approach uses JSON Web Tokens.
+
+The project imports the JWT library:
+
+```javascript
+const jwt = require("jsonwebtoken");
+```
+
+A secret key is defined:
+
+```javascript
+const SECRET_KEY = "mysecretkey";
+```
+
+The secret is used to sign and verify JWTs.
+
+---
+
+# 🔑 JWT Login
+
+```http
+POST /jwt-login
+```
+
+When the user logs in, the server creates a JWT:
+
+```javascript
+const token = jwt.sign(
+  {
+    id: 1,
+    name: "Andrew"
+  },
+  SECRET_KEY,
+  {
+    expiresIn: "1h"
+  }
+);
+```
+
+The token contains user information:
+
+```text
+id
+name
+```
+
+and is signed using:
+
+```text
+SECRET_KEY
+```
+
+The token is configured to expire after:
+
+```text
+1 hour
+```
+
+The server returns:
+
+```json
+{
+  "token": "YOUR_JWT_TOKEN"
+}
+```
+
+---
+
+# 🪪 Understanding JWT
+
+JWT stands for:
+
+**JSON Web Token**
+
+A JWT is a signed token that can be used to represent authenticated information.
+
+Conceptually:
+
+```text
+User Information
+       ↓
+   JWT Sign
+       ↓
+     Token
+       ↓
+     Client
+```
+
+The client can then send that token when accessing protected resources.
+
+---
+
+# 4. JWT Authorization Header
+
+The protected endpoint expects the JWT in the `Authorization` header.
+
+```http
+Authorization: Bearer YOUR_JWT_TOKEN
+```
+
+The application reads the header:
+
+```javascript
+const token =
+  req.headers["authorization"]?.split(" ")[1];
+```
+
+The code extracts the token after:
+
+```text
+Bearer
+```
+
+For example:
+
+```text
+Authorization: Bearer abc123
+```
+
+becomes:
+
+```text
+abc123
+```
+
+---
+
+# 🔍 JWT Verification
+
+Once the token has been extracted, the server verifies it:
+
+```javascript
+const decoded = jwt.verify(
+  token,
+  SECRET_KEY
+);
+```
+
+If verification succeeds, the decoded user information can be accessed:
+
+```javascript
+decoded.name
+```
+
+The server then responds:
+
+```json
+{
+  "message": "Hello Andrew"
+}
+```
+
+---
+
+# ❌ Missing JWT
+
+If no token is supplied:
+
+```javascript
+if (!token) {
+  return res.status(401).json({
+    error: "Token required"
+  });
+}
+```
+
+The API returns:
+
+```text
+401 Unauthorized
+```
+
+This means the request did not provide the required authentication credentials.
+
+---
+
+# ❌ Invalid JWT
+
+If the token cannot be verified:
+
+```javascript
+try {
+  const decoded = jwt.verify(token, SECRET_KEY);
+} catch (err) {
+  res.status(401).json({
+    error: "Invalid token"
+  });
+}
+```
+
+The API returns:
+
+```json
+{
+  "error": "Invalid token"
+}
+```
+
+with:
+
+```text
+401 Unauthorized
+```
+
+---
+
+# ⚖️ Sessions vs JWT
+
+| Concept                            | Session                   | JWT                |
+| ---------------------------------- | ------------------------- | ------------------ |
+| Authentication state               | Server-side               | Token-based        |
+| Client carries                     | Session identifier/cookie | JWT                |
+| Server stores authentication state | Yes                       | Generally no       |
+| Verification                       | Session lookup            | Token verification |
+| Example                            | `req.session.user`        | `jwt.verify()`     |
+| Project endpoint                   | `/session-protected`      | `/jwt-protected`   |
+| Expiration                         | Session configuration     | JWT expiration     |
+| Typical approach                   | Stateful                  | Stateless          |
+
+---
+
+# 🔄 Complete Authentication Flow
+
+```text
+                         Client
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+             ▼                           ▼
+       Session Login                  JWT Login
+             │                           │
+             ▼                           ▼
+      Create Session                 Sign Token
+             │                           │
+             ▼                           ▼
+       Session Cookie                   JWT
+             │                           │
+             ▼                           ▼
+    Session Protected             JWT Protected
+             │                           │
+             ▼                           ▼
+       Check Session                Verify Token
+             │                           │
+        ┌────┴────┐                 ┌────┴────┐
+        │         │                 │         │
+      Valid     Missing           Valid     Invalid
+        │         │                 │         │
+        ▼         ▼                 ▼         ▼
+      Allow       401              Allow       401
+```
+
+---
+
+# 🧠 Key Concepts
+
+## 1. Stateful Authentication
+
+Session-based authentication is commonly described as stateful because authentication information is maintained on the server.
+
+```text
+Client
+   ↓
+Session ID
+   ↓
+Server
+   ↓
+Session Data
+```
+
+The server needs access to the session information when processing the request.
+
+---
+
+## 2. Stateless Authentication
+
+JWT authentication is commonly described as stateless because the authentication information needed to verify the token can be contained in the token itself.
+
+```text
+Client
+   ↓
+JWT
+   ↓
+Server
+   ↓
+Verify Signature
+   ↓
+Allow / Reject
+```
+
+The server does not need to maintain the same type of session record for every authenticated request.
+
+---
+
+## 3. Token Signing
+
+The JWT is signed using:
+
+```javascript
+SECRET_KEY
+```
+
+The signature helps the server determine whether the token can be verified using the expected secret.
+
+---
+
+## 4. Token Expiration
+
+This project configures the JWT to expire:
+
+```javascript
+{
+  expiresIn: "1h"
+}
+```
+
+That means the token is intended to remain valid for one hour.
+
+After expiration, verification should fail and the client would need to authenticate again or use a refresh-token mechanism in a more complete system.
+
+---
+
+## 5. Protected Routes
+
+Both authentication methods protect resources.
+
+Session:
+
+```text
+/session-protected
+```
+
+JWT:
+
+```text
+/jwt-protected
+```
+
+The basic pattern is:
+
+```text
+Request
+   ↓
+Authentication Check
+   ↓
+Authenticated?
+   │
+   ├── Yes → Protected Resource
+   │
+   └── No → 401
+```
+
+---
+
+# 📊 HTTP Status Codes
+
+This project demonstrates:
+
+| Status | Meaning      | Project Usage                                 |
+| ------ | ------------ | --------------------------------------------- |
+| `401`  | Unauthorized | User is not authenticated or token is invalid |
+
+Examples include:
+
+```text
+Not logged in
+```
+
+```text
+Token required
+```
+
+```text
+Invalid token
+```
+
+---
+
+# 🚨 Important Security Note
+
+The authentication implementation in this project is intentionally simplified for educational purposes.
+
+The project currently uses hardcoded secrets:
+
+```javascript
+secret: "keyboard cat"
+```
+
+and:
+
+```javascript
+const SECRET_KEY = "mysecretkey";
+```
+
+These should **never be hardcoded in a production application**.
+
+Production applications should use:
+
+* Environment variables
+* Strong randomly generated secrets
+* Secure secret-management systems
+* HTTPS
+* Secure cookies
+* Appropriate cookie flags
+* Password hashing
+* Input validation
+* Rate limiting
+* Secure session storage
+* Token expiration
+* Refresh-token strategies where appropriate
+* Proper authentication middleware
+* Proper authorization middleware
+
+The session configuration in this project is also intentionally simple.
+
+A production application should carefully configure session cookies and use an appropriate persistent session store rather than relying on a basic in-memory development setup.
+
+---
+
+# 📦 Technologies
+
+* **Node.js**
+* **Express.js**
+* **JavaScript**
+* **express-session**
+* **jsonwebtoken**
+* **HTTP**
+* **JSON**
+* **Session-Based Authentication**
+* **JWT Authentication**
+
+---
+
+# 🚀 Getting Started
+
+## Prerequisites
+
+Make sure Node.js and npm are installed:
+
+```bash
+node -v
+npm -v
+```
+
+---
+
+## 1. Install Dependencies
+
+From the project directory:
+
+```bash
+npm install
+```
+
+The project requires:
+
+```bash
+npm install express express-session jsonwebtoken
+```
+
+---
+
+## 2. Start the Server
+
+```bash
+node index.js
+```
+
+The server will run on:
+
+```text
+http://localhost:9000
+```
+
+You should see:
+
+```text
+Auth API running on port 9000
+```
+
+---
+
+# 🧪 Testing
+
+You can test the API using:
+
+* Postman
+* cURL
+* Thunder Client
+* VS Code REST Client
+* Insomnia
+
+---
+
+# Test Session Authentication
+
+## 1. Login Using Session
+
+```bash
+curl -i -c cookies.txt -X POST http://localhost:9000/session-login
+```
+
+Expected response:
+
+```json
+{
+  "message": "Logged in with session"
+}
+```
+
+The `-c cookies.txt` option saves the session cookie returned by the server.
+
+---
+
+## 2. Access Session-Protected Route
+
+```bash
+curl -b cookies.txt http://localhost:9000/session-protected
+```
+
+Expected response:
+
+```json
+{
+  "message": "Hello Andrew"
+}
+```
+
+---
+
+## 3. Access Without Session
+
+```bash
+curl http://localhost:9000/session-protected
+```
+
+Expected:
+
+```json
+{
+  "error": "Not logged in"
+}
+```
+
+Status:
+
+```text
+401 Unauthorized
+```
+
+---
+
+# Test JWT Authentication
+
+## 1. Login Using JWT
+
+```bash
+curl -X POST http://localhost:9000/jwt-login
+```
+
+Expected response:
+
+```json
+{
+  "token": "YOUR_JWT_TOKEN"
+}
+```
+
+Copy the token from the response.
+
+---
+
+## 2. Access JWT-Protected Route
+
+Replace `YOUR_JWT_TOKEN` with the token you received:
+
+```bash
+curl http://localhost:9000/jwt-protected \
+-H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+Expected response:
+
+```json
+{
+  "message": "Hello Andrew"
+}
+```
+
+---
+
+## 3. Access Without JWT
+
+```bash
+curl http://localhost:9000/jwt-protected
+```
+
+Expected:
+
+```json
+{
+  "error": "Token required"
+}
+```
+
+Status:
+
+```text
+401 Unauthorized
+```
+
+---
+
+## 4. Access With Invalid JWT
+
+```bash
+curl http://localhost:9000/jwt-protected \
+-H "Authorization: Bearer invalid-token"
+```
+
+Expected:
+
+```json
+{
+  "error": "Invalid token"
+}
+```
+
+Status:
+
+```text
+401 Unauthorized
+```
+
+---
+
+# 📁 Project Structure
+
+```text
+project-07/
+│
+├── index.js
+├── package.json
+└── README.md
+```
+
+### `index.js`
+
+Contains the Express application, session configuration, session authentication routes, JWT authentication routes, protected resources, and server configuration.
+
+### `package.json`
+
+Contains the Node.js project configuration and dependencies.
+
+### `README.md`
+
+Contains the documentation for the project and the authentication concepts demonstrated.
+
+---
+
+# 💡 Possible Improvements
+
+This project intentionally uses simple implementations to isolate the difference between session authentication and JWT authentication.
+
+Possible improvements include:
+
+* Store users in PostgreSQL or MongoDB
+* Hash passwords with bcrypt or Argon2
+* Create user registration
+* Add proper login validation
+* Create authentication middleware
+* Create authorization middleware
+* Store the JWT secret in environment variables
+* Store session secrets in environment variables
+* Use a production session store
+* Configure secure session cookies
+* Add refresh tokens
+* Add token revocation
+* Add logout functionality
+* Add password reset
+* Add rate limiting
+* Add account lockout
+* Add automated security tests
+* Add role-based authorization
+* Add permission-based authorization
+* Add centralized error handling
+
+A more realistic architecture could separate authentication into middleware:
+
+```text
+Request
+   │
+   ▼
+Authentication Middleware
+   │
+   ├── Session Authentication
+   │
+   └── JWT Authentication
+   │
+   ▼
+Authenticated User
+   │
+   ▼
+Authorization Middleware
+   │
+   ▼
+Controller
+   │
+   ▼
+Response
+```
+
+---
+
+# 🎓 Learning Outcome
+
+After completing this project, you should be able to explain:
+
+* What session-based authentication means
+* What JWT authentication means
+* How Express sessions work conceptually
+* How JWTs are created
+* How JWTs are signed
+* How JWTs are verified
+* How JWT expiration works
+* How authentication state differs between sessions and JWTs
+* How protected routes work
+* How authorization headers carry JWTs
+* Why secrets should not be hardcoded
+* The difference between stateful and stateless authentication
+* When sessions and JWTs can be used in backend applications
+
+The key lesson is:
+
+> **Sessions maintain authentication state through a server-managed session, while JWT authentication uses a signed token that the client presents to the server.**
+
+---
+
+# 🔗 Blueprint Information
+
+**Series:** Backend System Design — 40 Project Blueprints
+
+**Project:** 07 / 40
+
+**Concept:** Session-Based Authentication vs JWT Authentication
+
+**Focus:** Understanding how sessions and JSON Web Tokens authenticate users and protect backend resources.
+
+---
+
+# 👨‍💻 Creator
+
+**Andrew Emaye**
+
+This project is part of my practical backend development and system-design learning series, focused on understanding the architectures, patterns, and building blocks used to create scalable applications.
+
+---
+
+# 🔒 Privacy Policy
+
+This project is an educational backend application and does not intentionally collect, sell, or share personal user information.
+
+The user information contained in the project is **mock demonstration data** and is not associated with real user accounts.
+
+The project does not implement a production user database or real authentication system.
+
+If this project is extended to process real user information, appropriate privacy, security, authentication, and data-protection measures should be implemented.
+
+---
+
+# 📄 License
+
+This project is licensed under the **MIT License**.
+
+You are free to use, copy, modify, merge, publish, distribute, sublicense, and sell copies of the project, subject to the conditions of the MIT License.
+
+See the `LICENSE` file in this repository for the full license text.
+
+---
+
+## ⭐ Keep Learning
+
+**Build it. Break it. Understand it. Scale it.**
